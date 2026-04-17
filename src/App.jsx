@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Play, RotateCcw, Trophy, Clock, Target, Keyboard, BookOpen, SkipForward, History, ArrowLeft, User, Trash2, Volume2, VolumeX, LogOut, Award, Star, ChevronUp } from 'lucide-react';
+import { Play, RotateCcw, Trophy, Clock, Target, Keyboard, BookOpen, SkipForward, History, ArrowLeft, User, Trash2, Volume2, VolumeX, LogOut, Award, Star, ChevronUp, Settings, Plus, List, Database } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
@@ -10,12 +10,13 @@ import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from 'fi
 // （※セキュリティルールはテストモードまたは書き込み許可にしてください）
 // ============================================================================
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCr83WtC2A2sRnfRheCJXJ_LbKqJh9SEbw",
+  authDomain: "suken-quiz.firebaseapp.com",
+  projectId: "suken-quiz",
+  storageBucket: "suken-quiz.firebasestorage.app",
+  messagingSenderId: "671502632390",
+  appId: "1:671502632390:web:9075453b0b5475a94f1ec7",
+  measurementId: "G-Q22QF5PG4L"
 };
 
 let app, auth, db;
@@ -27,8 +28,8 @@ try {
   console.error("Firebase init error", e);
 }
 
-// --- データ定義 ---
-const CATEGORIES = [
+// --- デフォルトのデータ定義 ---
+const DEFAULT_CATEGORIES = [
   { id: 0, name: "NH1 Unit 1" }, { id: 1, name: "NH1 Unit 2" }, { id: 2, name: "NH1 Unit 3" },
   { id: 3, name: "NH1 Unit 4" }, { id: 4, name: "NH1 Unit 5" }, { id: 5, name: "NH1 Unit 6" },
   { id: 6, name: "NH1 Unit 7" }, { id: 7, name: "NH1 Unit 8" }, { id: 8, name: "NH1 Unit 9" },
@@ -36,12 +37,7 @@ const CATEGORIES = [
   { id: 12, name: "NH2 Unit 1 Part 2" }, { id: 13, name: "NH2 Unit 1 Read & Think" }
 ];
 
-const getCategoryName = (id) => {
-  const cat = CATEGORIES.find(c => c.id === id);
-  return cat ? cat.name : "不明";
-};
-
-const WORD_DATA = [
+const DEFAULT_WORD_DATA = [
   { cat: 0, en: "call", ja: "呼ぶ" }, { cat: 0, en: "love", ja: "大好きである" }, { cat: 0, en: "everyone", ja: "みんな" }, { cat: 0, en: "sweet", ja: "甘いもの" }, { cat: 0, en: "join", ja: "参加する" }, { cat: 0, en: "club", ja: "クラブ" }, { cat: 0, en: "often", ja: "よく、しばしば" }, { cat: 0, en: "friend", ja: "友達" }, { cat: 0, en: "great", ja: "すばらしい" }, { cat: 0, en: "draw", ja: "描く" }, { cat: 0, en: "comic", ja: "漫画" }, { cat: 0, en: "art", ja: "芸術" },
   { cat: 1, en: "class", ja: "クラス" }, { cat: 1, en: "our", ja: "私たちの" }, { cat: 1, en: "new", ja: "新しい" }, { cat: 1, en: "teacher", ja: "先生" }, { cat: 1, en: "team", ja: "チーム" }, { cat: 1, en: "food", ja: "食べ物" }, { cat: 1, en: "father", ja: "父" }, { cat: 1, en: "read", ja: "読む" }, { cat: 1, en: "really", ja: "本当に" }, { cat: 1, en: "excuse", ja: "許す" }, { cat: 1, en: "welcome", ja: "歓迎する" },
   { cat: 2, en: "symbol", ja: "シンボル" }, { cat: 2, en: "favorite", ja: "お気に入りの" }, { cat: 2, en: "character", ja: "キャラクター" }, { cat: 2, en: "family", ja: "家族" }, { cat: 2, en: "brave", ja: "勇敢な" }, { cat: 2, en: "kind", ja: "親切な" }, { cat: 2, en: "around", ja: "～の周りに" }, { cat: 2, en: "live", ja: "住む" }, { cat: 2, en: "study", ja: "勉強する" }, { cat: 2, en: "win", ja: "勝つ" }, { cat: 2, en: "next", ja: "次の" }, { cat: 2, en: "luck", ja: "運" }, { cat: 2, en: "practice", ja: "練習する" }, { cat: 2, en: "station", ja: "駅" },
@@ -99,9 +95,14 @@ const calculateEarnedXP = (qCount, timeMs, accuracy, skips) => {
 
 
 export default function App() {
-  const [gameState, setGameState] = useState('start'); 
+  const [gameState, setGameState] = useState('start'); // 'start', 'playing', 'result', 'history', 'admin'
   
   const [user, setUser] = useState(null);
+  
+  // クラウドから取得する動的なカテゴリと単語データ
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [wordData, setWordData] = useState(DEFAULT_WORD_DATA);
+  
   const [histories, setHistories] = useState([]);
   const [hasSaved, setHasSaved] = useState(false);
   const [playerName, setPlayerName] = useState(''); 
@@ -171,19 +172,44 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // --- Firestoreから履歴、および追加登録されたカスタムデータを取得 ---
   useEffect(() => {
     if (!user || !db) return;
-    const historyRef = collection(db, 'playHistory');
     
-    const unsubscribe = onSnapshot(historyRef, (snapshot) => {
+    // Vercel用に独自のFirebaseを使う場合は以下の3つのパスを書き換えてください。
+    // const historyRef = collection(db, 'playHistory');
+    // const catRef = collection(db, 'customCategories');
+    // const wordRef = collection(db, 'customWords');
+    
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const historyRef = collection(db, 'artifacts', appId, 'public', 'data', 'playHistory');
+    const catRef = collection(db, 'artifacts', appId, 'public', 'data', 'customCategories');
+    const wordRef = collection(db, 'artifacts', appId, 'public', 'data', 'customWords');
+    
+    const unsubHistory = onSnapshot(historyRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       data.sort((a, b) => b.timestamp - a.timestamp); 
       setHistories(data);
-    }, (error) => {
-      console.error("History fetch error", error);
+    }, (error) => console.error("History fetch error", error));
+
+    const unsubCat = onSnapshot(catRef, (snapshot) => {
+      const customCats = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+      const merged = [...DEFAULT_CATEGORIES, ...customCats].sort((a, b) => a.id - b.id);
+      setCategories(merged);
     });
-    return () => unsubscribe();
+
+    const unsubWord = onSnapshot(wordRef, (snapshot) => {
+      const customWords = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+      setWordData([...DEFAULT_WORD_DATA, ...customWords]);
+    });
+
+    return () => { unsubHistory(); unsubCat(); unsubWord(); };
   }, [user]);
+
+  const getCategoryNameCurrent = useCallback((id) => {
+    const cat = categories.find(c => c.id === id);
+    return cat ? cat.name : "不明";
+  }, [categories]);
 
   const uniquePlayersFromDB = Array.from(new Set(histories.map(h => h.playerName))).filter(Boolean);
   const combinedPlayerNames = Array.from(new Set([...localPlayerNames, ...uniquePlayersFromDB])).sort();
@@ -211,7 +237,10 @@ export default function App() {
           const currentAccuracy = getAccuracy();
           const xp = calculateEarnedXP(initialWordCount, timeElapsed, currentAccuracy, skipCount);
           
-          const historyRef = collection(db, 'playHistory');
+          // Vercelで独自のFirebaseを使う場合は変更: const historyRef = collection(db, 'playHistory');
+          const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+          const historyRef = collection(db, 'artifacts', appId, 'public', 'data', 'playHistory');
+          
           await addDoc(historyRef, {
             playerName: playerName.trim() || '名無し',
             timestamp: Date.now(),
@@ -254,7 +283,7 @@ export default function App() {
   };
 
   const startGame = () => {
-    const filteredWords = WORD_DATA.filter(w => w.cat >= startCategory && w.cat <= endCategory);
+    const filteredWords = wordData.filter(w => w.cat >= startCategory && w.cat <= endCategory);
     if (filteredWords.length === 0) {
       alert("選択した範囲に単語がありません。");
       return;
@@ -399,7 +428,10 @@ export default function App() {
   const executeDelete = async () => {
     if (!deleteTarget || !db || !user) return;
     
-    const getDocRef = (id) => doc(db, 'playHistory', id);
+    // Vercel等で独自のFirebaseを使う場合は以下の行に書き換えてください。
+    // const getDocRef = (id) => doc(db, 'playHistory', id);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const getDocRef = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'playHistory', id);
     
     try {
       if (deleteTarget.type === 'single') {
@@ -417,12 +449,18 @@ export default function App() {
 
   // --- UI レンダリング ---
   const renderStartScreen = () => {
-    const availableWordsCount = WORD_DATA.filter(w => w.cat >= startCategory && w.cat <= endCategory).length;
+    const availableWordsCount = wordData.filter(w => w.cat >= startCategory && w.cat <= endCategory).length;
     const canStart = availableWordsCount > 0 && playerName.trim() !== '';
     
     return (
       <div className="flex flex-col items-center justify-center space-y-8 animate-in fade-in zoom-in duration-500 py-10 w-full max-w-md">
-        <div className="w-full flex justify-end">
+        <div className="w-full flex justify-between">
+           <button 
+             onClick={() => setGameState('admin')}
+             className="flex items-center space-x-2 text-slate-400 hover:text-indigo-600 px-3 py-2 rounded-xl font-bold transition-colors active:scale-95"
+           >
+             <Settings className="w-5 h-5" />
+           </button>
            <button 
              onClick={() => setGameState('history')}
              className="flex items-center space-x-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-4 py-2 rounded-xl font-bold transition-colors active:scale-95"
@@ -441,7 +479,6 @@ export default function App() {
         </div>
 
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 w-full space-y-6">
-          
           <div>
             <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700 mb-2">
               <User className="w-4 h-4" />
@@ -491,7 +528,7 @@ export default function App() {
                 onChange={handleStartCategoryChange}
                 className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm md:text-base rounded-xl focus:ring-indigo-500 focus:border-indigo-500 block p-3 outline-none transition-colors font-medium"
               >
-                {CATEGORIES.map(cat => (
+                {categories.map(cat => (
                   <option key={cat.id} value={cat.id}>{cat.name}</option>
                 ))}
               </select>
@@ -506,7 +543,7 @@ export default function App() {
                 onChange={(e) => setEndCategory(Number(e.target.value))}
                 className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm md:text-base rounded-xl focus:ring-indigo-500 focus:border-indigo-500 block p-3 outline-none transition-colors font-medium"
               >
-                {CATEGORIES.filter(cat => cat.id >= startCategory).map(cat => (
+                {categories.filter(cat => cat.id >= startCategory).map(cat => (
                   <option key={cat.id} value={cat.id}>{cat.name}</option>
                 ))}
               </select>
@@ -951,7 +988,7 @@ export default function App() {
                       <td className="p-4 text-base font-bold text-indigo-700 whitespace-nowrap">{h.playerName}</td>
                       <td className="p-4 text-sm font-medium text-slate-500 whitespace-nowrap">{formatDate(h.timestamp)}</td>
                       <td className="p-4 text-sm text-slate-600 min-w-[150px]">
-                        {getCategoryName(h.startCategory)} <br className="md:hidden" /><span className="text-slate-400 mx-1 md:inline hidden">〜</span> {getCategoryName(h.endCategory)}
+                        {getCategoryNameCurrent(h.startCategory)} <br className="md:hidden" /><span className="text-slate-400 mx-1 md:inline hidden">〜</span> {getCategoryNameCurrent(h.endCategory)}
                       </td>
                       <td className="p-4 text-center font-mono font-bold text-slate-700">{h.questionCount}</td>
                       <td className="p-4 text-center font-mono font-bold text-yellow-600">+{h.earnedXP || 0}</td>
@@ -978,12 +1015,183 @@ export default function App() {
     );
   };
 
+  const AdminScreen = () => {
+    const [newCatName, setNewCatName] = useState('');
+    const [bulkWordsText, setBulkWordsText] = useState('');
+    const [selectedCatForBulk, setSelectedCatForBulk] = useState(categories[categories.length - 1]?.id || 0);
+
+    const handleAddCategory = async () => {
+      if (!newCatName.trim() || !user || !db) return;
+      try {
+        const nextId = Math.max(...categories.map(c => c.id), 0) + 1;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const catRef = collection(db, 'artifacts', appId, 'public', 'data', 'customCategories');
+        await addDoc(catRef, { id: nextId, name: newCatName.trim() });
+        setNewCatName('');
+        alert("新しい出題範囲を追加しました！");
+      } catch (e) {
+        console.error("Add category error", e);
+        alert("追加に失敗しました。");
+      }
+    };
+
+    const handleAddBulkWords = async () => {
+      if (!bulkWordsText.trim() || !user || !db) return;
+      try {
+        const lines = bulkWordsText.trim().split('\n');
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        let addedCount = 0;
+        
+        for (const line of lines) {
+          const parts = line.split(/[\t,]+| +/);
+          if (parts.length >= 2) {
+            const en = parts[0].trim();
+            const ja = parts.slice(1).join(' ').trim();
+            if (en && ja) {
+              const wordRef = collection(db, 'artifacts', appId, 'public', 'data', 'customWords');
+              await addDoc(wordRef, { cat: Number(selectedCatForBulk), en, ja });
+              addedCount++;
+            }
+          }
+        }
+        setBulkWordsText('');
+        alert(`${addedCount}個の単語を追加しました！`);
+      } catch (e) {
+        console.error("Add words error", e);
+        alert("追加に失敗しました。");
+      }
+    };
+
+    const handleDeleteCustomWord = async (docId) => {
+      if (!confirm("この単語を削除しますか？")) return;
+      const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customWords', docId));
+    };
+
+    // カスタムで追加されたデータのみ表示
+    const customWordsList = wordData.filter(w => w.docId);
+
+    return (
+      <div className="flex flex-col items-center w-full max-w-5xl py-10 animate-in fade-in duration-300">
+        <div className="w-full flex items-center justify-between mb-8">
+          <button 
+            onClick={() => setGameState('start')}
+            className="flex items-center space-x-2 text-slate-500 hover:text-indigo-600 font-bold transition-colors bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-100"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            <span>トップに戻る</span>
+          </button>
+          <h2 className="text-3xl font-extrabold text-gray-800 flex items-center space-x-3">
+            <Database className="w-8 h-8 text-indigo-500" />
+            <span>単語データの管理</span>
+          </h2>
+          <div className="w-32 hidden md:block"></div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full mb-8">
+          
+          <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6">
+            <h3 className="text-xl font-bold text-slate-700 flex items-center space-x-2">
+              <Plus className="w-6 h-6 text-indigo-500"/>
+              <span>新しい出題範囲を作る</span>
+            </h3>
+            <p className="text-sm text-slate-500">例: 「中2 Unit 2 Part 1」など、新しいカテゴリを追加します。</p>
+            <div className="flex space-x-2">
+              <input 
+                type="text" 
+                value={newCatName}
+                onChange={e => setNewCatName(e.target.value)}
+                placeholder="新しい出題範囲の名前"
+                className="flex-1 bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-xl focus:ring-indigo-500 focus:border-indigo-500 p-3 outline-none"
+              />
+              <button 
+                onClick={handleAddCategory}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-6 py-3 rounded-xl transition-colors whitespace-nowrap"
+              >作成</button>
+            </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6">
+            <h3 className="text-xl font-bold text-slate-700 flex items-center space-x-2">
+              <List className="w-6 h-6 text-indigo-500"/>
+              <span>単語を一括登録する</span>
+            </h3>
+            <p className="text-sm text-slate-500">
+              NotebookLMの出力をコピーして貼り付けてください。<br/>
+              <b>「英単語(スペース)日本語訳」</b>の形式で1行ずつ入力します。<br/>
+              （例: apple りんご）
+            </p>
+            
+            <select 
+              value={selectedCatForBulk}
+              onChange={e => setSelectedCatForBulk(Number(e.target.value))}
+              className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-xl focus:ring-indigo-500 focus:border-indigo-500 p-3 outline-none font-bold"
+            >
+              {categories.map(cat => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+            </select>
+
+            <textarea 
+              value={bulkWordsText}
+              onChange={e => setBulkWordsText(e.target.value)}
+              rows={5}
+              placeholder="apple りんご
+banana ばなな"
+              className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-xl focus:ring-indigo-500 focus:border-indigo-500 p-3 outline-none font-mono"
+            />
+            
+            <button 
+              onClick={handleAddBulkWords}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-6 py-3 rounded-xl transition-colors"
+            >一括登録する</button>
+          </div>
+        </div>
+
+        {customWordsList.length > 0 && (
+          <div className="w-full bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden p-8">
+            <h3 className="text-xl font-bold text-slate-700 mb-6">追加登録された単語一覧</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-500 text-sm border-b border-slate-100">
+                    <th className="p-4 font-bold">出題範囲</th>
+                    <th className="p-4 font-bold">英単語</th>
+                    <th className="p-4 font-bold">日本語訳</th>
+                    <th className="p-4 font-bold text-center">削除</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customWordsList.map(w => (
+                    <tr key={w.docId} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors">
+                      <td className="p-4 text-sm text-slate-600">{getCategoryNameCurrent(w.cat)}</td>
+                      <td className="p-4 font-mono font-bold text-indigo-600">{w.en}</td>
+                      <td className="p-4 font-bold text-slate-700">{w.ja}</td>
+                      <td className="p-4 text-center">
+                        <button 
+                          onClick={() => handleDeleteCustomWord(w.docId)}
+                          className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        ><Trash2 className="w-5 h-5"/></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex items-center justify-center p-4 font-sans selection:bg-indigo-100">
       {gameState === 'start' && renderStartScreen()}
       {gameState === 'playing' && renderPlayingScreen()}
       {gameState === 'result' && renderResultScreen()}
       {gameState === 'history' && renderHistoryScreen()}
+      {gameState === 'admin' && <AdminScreen />}
     </div>
   );
 }
