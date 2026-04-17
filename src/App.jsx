@@ -10,13 +10,12 @@ import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from 'fi
 // （※セキュリティルールはテストモードまたは書き込み許可にしてください）
 // ============================================================================
 const firebaseConfig = {
-  apiKey: "AIzaSyCr83WtC2A2sRnfRheCJXJ_LbKqJh9SEbw",
-  authDomain: "suken-quiz.firebaseapp.com",
-  projectId: "suken-quiz",
-  storageBucket: "suken-quiz.firebasestorage.app",
-  messagingSenderId: "671502632390",
-  appId: "1:671502632390:web:9075453b0b5475a94f1ec7",
-  measurementId: "G-Q22QF5PG4L"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
 let app, auth, db;
@@ -234,6 +233,7 @@ export default function App() {
       setHasSaved(true);
     }
   }, [gameState, hasSaved, user, getAccuracy, playerName, startCategory, endCategory, initialWordCount, timeElapsed, missCount, skipCount]);
+
 
   const playWordAudio = useCallback((wordText) => {
     if (!isTTSEnabled || !('speechSynthesis' in window)) return;
